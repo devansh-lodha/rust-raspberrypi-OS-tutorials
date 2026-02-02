@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2020-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! GICv2 Driver - ARM Generic Interrupt Controller v2.
 //!
@@ -104,13 +105,13 @@ pub type IRQNumber = BoundedUsize<{ GICv2::MAX_IRQ_NUMBER }>;
 /// Representation of the GIC.
 pub struct GICv2 {
     /// The Distributor.
-    gicd: gicd::GICD,
+    pub(crate) gicd: gicd::GICD,
 
     /// The CPU Interface.
-    gicc: gicc::GICC,
+    pub(crate) gicc: gicc::GICC,
 
     /// Stores registered IRQ handlers. Writable only during kernel init. RO afterwards.
-    handler_table: InitStateLock<HandlerTable>,
+    pub(crate) handler_table: InitStateLock<HandlerTable>,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -136,6 +137,12 @@ impl GICv2 {
             gicc: gicc::GICC::new(gicc_mmio_start_addr),
             handler_table: InitStateLock::new(Vec::new()),
         }
+    }
+
+    /// Set the trigger type for an interrupt (Edge or Level).
+    #[cfg(feature = "bsp_rpi5")]
+    pub fn set_trigger(&self, irq_number: &IRQNumber, edge: bool) {
+        self.gicd.set_trigger(irq_number, edge);
     }
 }
 

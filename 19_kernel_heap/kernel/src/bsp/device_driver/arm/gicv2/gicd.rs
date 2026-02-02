@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2020-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! GICD Driver - GIC Distributor.
 //!
@@ -54,7 +55,8 @@ register_structs! {
         (0x104 => ISENABLER: [ReadWrite<u32>; 31]),
         (0x180 => _reserved2),
         (0x820 => ITARGETSR: [ReadWrite<u32, ITARGETSR::Register>; 248]),
-        (0xC00 => @END),
+        (0xC00 => ICFGR: [ReadWrite<u32>; 64]),
+        (0xD00 => @END),
     }
 }
 
@@ -65,7 +67,9 @@ register_structs! {
         (0x100 => ISENABLER: ReadWrite<u32>),
         (0x104 => _reserved2),
         (0x800 => ITARGETSR: [ReadOnly<u32, ITARGETSR::Register>; 8]),
-        (0x820 => @END),
+        (0x820 => _reserved3),
+        (0xC00 => ICFGR: [ReadWrite<u32>; 2]), // Banked for PPIs
+        (0xC08 => @END),
     }
 }
 
@@ -194,6 +198,35 @@ impl GICD {
                 self.shared_registers.lock(|regs| {
                     let enable_reg = &regs.ISENABLER[enable_reg_index_shared];
                     enable_reg.set(enable_reg.get() | enable_bit);
+                });
+            }
+        }
+    }
+
+    /// Set the trigger type for an interrupt (Edge or Level).
+    #[cfg(feature = "bsp_rpi5")]
+    pub fn set_trigger(&self, irq_num: &super::IRQNumber, edge: bool) {
+        let irq_num = irq_num.get();
+        // Each register holds 16 IRQs (2 bits per IRQ).
+        let reg_index = irq_num >> 4;
+        let bit_shift = (irq_num % 16) * 2;
+        let config_val = if edge { 0b10 } else { 0b00 }; // 10=Edge, 00=Level
+
+        match irq_num {
+            0..=31 => {
+                let reg = &self.banked_registers.ICFGR[reg_index];
+                let mut val = reg.get();
+                val &= !(0b11 << bit_shift);
+                val |= config_val << bit_shift;
+                reg.set(val);
+            }
+            _ => {
+                self.shared_registers.lock(|regs| {
+                    let reg = &regs.ICFGR[reg_index];
+                    let mut val = reg.get();
+                    val &= !(0b11 << bit_shift);
+                    val |= config_val << bit_shift;
+                    reg.set(val);
                 });
             }
         }

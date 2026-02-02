@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2020-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! BSP asynchronous exception handling.
 
@@ -25,4 +26,11 @@ pub(in crate::bsp) mod irq_map {
     use super::bsp::device_driver::IRQNumber;
 
     pub const PL011_UART: IRQNumber = IRQNumber::new(153);
+}
+
+#[cfg(feature = "bsp_rpi5")]
+pub(in crate::bsp) mod irq_map {
+    use super::bsp::device_driver::IRQNumber;
+
+    pub const PL011_UART: IRQNumber = IRQNumber::new(160);
 }
