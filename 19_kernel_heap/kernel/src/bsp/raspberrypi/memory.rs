@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! BSP Memory Management.
 //!
@@ -145,6 +146,45 @@ pub(super) mod map {
         pub const GICC_SIZE:        usize             =              0x14;
 
         pub const END:              Address<Physical> = Address::new(0xFF85_0000);
+    }
+
+    /// Physical devices.
+    #[cfg(feature = "bsp_rpi5")]
+    pub mod mmio {
+        use super::*;
+
+        // GICv2 on BCM2712 (Northbridge)
+        pub const GICD_START:      Address<Physical> = Address::new(0x10_7FFF_9000);
+        pub const GICD_SIZE:       usize             =              0x1000;
+        pub const GICC_START:      Address<Physical> = Address::new(0x10_7FFF_A000);
+        pub const GICC_SIZE:       usize             =              0x1000;
+
+        // MIP (Machine Interrupt Peripheral)
+        pub const MIP_START:       Address<Physical> = Address::new(0x10_0013_0000);
+        pub const MIP_SIZE:        usize             =              0x1000;
+
+        // PCIe Root Complex
+        pub const PCIE_RC_START:   Address<Physical> = Address::new(0x10_0012_0000);
+        pub const PCIE_RC_SIZE:    usize             =              0x1000;
+
+        // RP1 Southbridge Config Space (ECAM)
+        // 0x1F_0010_0000 -> 0x1F_0050_0000 (4MB) covers Config Space + MSI-X Table
+        pub const RP1_CFG_START:   Address<Physical> = Address::new(0x1F_0010_0000);
+        pub const RP1_CFG_SIZE:    usize             =              0x40_0000;
+
+        // RP1 Peripherals
+        // UART is at offset 0x30000 in the RP1 peripheral bar
+        pub const PL011_UART_START: Address<Physical> = Address::new(0x1F_0003_0000);
+        pub const PL011_UART_SIZE:  usize             =              0x1000;
+
+        pub const GPIO_START:       Address<Physical> = Address::new(0x1F_000D_0000);
+        pub const GPIO_SIZE:        usize             =              0x1000;
+
+        pub const PADS_START:       Address<Physical> = Address::new(0x1F_000F_0000);
+        pub const PADS_SIZE:        usize             =              0x1000;
+
+        // Used by Translation Table Tool
+        pub const END:             Address<Physical> = Address::new(0x20_0000_0000);
     }
 
     pub const END: Address<Physical> = mmio::END;

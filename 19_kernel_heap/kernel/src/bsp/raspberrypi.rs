@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! Top-level BSP file for the Raspberry Pi 3 and 4.
 
@@ -23,5 +24,10 @@ pub fn board_name() -> &'static str {
     #[cfg(feature = "bsp_rpi4")]
     {
         "Raspberry Pi 4"
+    }
+
+    #[cfg(feature = "bsp_rpi5")]
+    {
+        "Raspberry Pi 5"
     }
 }
