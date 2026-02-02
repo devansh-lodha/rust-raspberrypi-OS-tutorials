@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 #
 # Copyright (c) 2021-2023 Andre Richter <andre.o.richter@gmail.com>
+# Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 # Raspberry Pi 3 + 4
 class RaspberryPi
@@ -41,6 +42,8 @@ class RaspberryPi
                 x[0]
             when :rpi4
                 x[1]
+            when :rpi5
+                x[2]
             else
                 raise
             end

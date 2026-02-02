@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 #
 # Copyright (c) 2021-2023 Andre Richter <andre.o.richter@gmail.com>
+# Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 require 'rubygems'
 require 'bundler/setup'
@@ -23,7 +24,7 @@ start = Time.now
 KERNEL_ELF = KernelELF.new(kernel_elf_path)
 
 BSP = case BSP_TYPE
-      when :rpi3, :rpi4
+      when :rpi3, :rpi4, :rpi5
           RaspberryPi.new
       else
           raise

@@ -1,6 +1,7 @@
 ## SPDX-License-Identifier: MIT OR Apache-2.0
 ##
 ## Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
+## Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 include ../common/docker.mk
 include ../common/format.mk
@@ -63,6 +64,22 @@ else ifeq ($(BSP),rpi4)
     JTAG_BOOT_IMAGE   = ../X1_JTAG_boot/jtag_boot_rpi4.img
     LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/bsp/raspberrypi
     RUSTC_MISC_ARGS   = -C target-cpu=cortex-a72 -C force-frame-pointers
+else ifeq ($(BSP),rpi5)
+    TARGET            = aarch64-unknown-none-softfloat
+    KERNEL_BIN        = kernel8.img
+    QEMU_BINARY       = echo "RPi5 QEMU not supported"; \#
+    QEMU_MACHINE_TYPE =
+    QEMU_RELEASE_ARGS =
+    QEMU_TEST_ARGS    =
+    OBJDUMP_BINARY    = aarch64-none-elf-objdump
+    NM_BINARY         = aarch64-none-elf-nm
+    READELF_BINARY    = aarch64-none-elf-readelf
+    GDB_BINARY        = aarch64-elf-gdb
+    GDB_INIT_FILE     = ../debug/pi5/gdb-init.txt
+    OPENOCD_ARG       = -f ../debug/pi5/cmsis-dap.cfg -f ../debug/pi5/raspberrypi5.cfg
+    JTAG_BOOT_IMAGE   = ../X2_pi5_jtag_halt_stub/halt_stub.img
+    LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/bsp/raspberrypi
+    RUSTC_MISC_ARGS   = -C target-cpu=cortex-a76 -C force-frame-pointers
 endif
 
 # Export for build.rs.
@@ -129,11 +146,11 @@ COMPILER_ARGS = --target=$(TARGET) \
 
 # build-std can be skipped for helper commands that do not rely on correct stack frames and other
 # custom compiler options. This results in a huge speedup.
-RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) -Z build-std=core,alloc --manifest-path $(KERNEL_MANIFEST)
-DOC_CMD     = cargo doc $(COMPILER_ARGS)
-CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
-TEST_CMD    = cargo test $(COMPILER_ARGS) -Z build-std=core,alloc --manifest-path $(KERNEL_MANIFEST)
-OBJCOPY_CMD = rust-objcopy \
+BASE_RUSTC_CMD   = cargo rustc $(COMPILER_ARGS) -Z build-std=core,alloc --manifest-path $(KERNEL_MANIFEST)
+BASE_DOC_CMD     = cargo doc $(COMPILER_ARGS)
+BASE_CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
+BASE_TEST_CMD    = cargo test $(COMPILER_ARGS) -Z build-std=core,alloc --manifest-path $(KERNEL_MANIFEST)
+BASE_OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary
 
@@ -149,6 +166,8 @@ DOCKER_CMD            = docker run -t --rm -v $(shell pwd):/work/tutorial -w /wo
 DOCKER_CMD_INTERACT   = $(DOCKER_CMD) -i
 DOCKER_ARG_DIR_COMMON = -v $(shell pwd)/../common:/work/common
 DOCKER_ARG_DIR_JTAG   = -v $(shell pwd)/../X1_JTAG_boot:/work/X1_JTAG_boot
+DOCKER_ARG_DIR_HALT   = -v $(shell pwd)/../X2_pi5_jtag_halt_stub:/work/X2_pi5_jtag_halt_stub
+DOCKER_ARG_DIR_DEBUG  = -v $(shell pwd)/../debug:/work/debug
 DOCKER_ARG_DEV        = --privileged -v /dev:/dev
 DOCKER_ARG_NET        = --network host
 
@@ -156,7 +175,7 @@ DOCKER_ARG_NET        = --network host
 DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)
 DOCKER_TOOLS = $(DOCKER_CMD) $(DOCKER_IMAGE)
 DOCKER_TEST  = $(DOCKER_CMD) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_IMAGE)
-DOCKER_GDB   = $(DOCKER_CMD_INTERACT) $(DOCKER_ARG_NET) $(DOCKER_IMAGE)
+DOCKER_GDB   = $(DOCKER_CMD_INTERACT) $(DOCKER_ARG_NET) $(DOCKER_ARG_DIR_DEBUG) $(DOCKER_IMAGE)
 
 # Dockerize commands, which require USB device passthrough, only on Linux.
 ifeq ($(shell uname -s),Linux)
@@ -164,12 +183,24 @@ ifeq ($(shell uname -s),Linux)
 
     DOCKER_CHAINBOOT = $(DOCKER_CMD_DEV) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_IMAGE)
     DOCKER_JTAGBOOT  = $(DOCKER_CMD_DEV) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_ARG_DIR_JTAG) $(DOCKER_IMAGE)
-    DOCKER_OPENOCD   = $(DOCKER_CMD_DEV) $(DOCKER_ARG_NET) $(DOCKER_IMAGE)
+    DOCKER_OPENOCD   = $(DOCKER_CMD_DEV) $(DOCKER_ARG_NET) $(DOCKER_ARG_DIR_DEBUG) $(DOCKER_IMAGE)
+    STUB_MAKE_CMD    = $(DOCKER_CMD) $(DOCKER_ARG_DIR_HALT) -w /work/X2_pi5_jtag_halt_stub $(DOCKER_IMAGE) make
+else ifeq ($(shell uname -s),Darwin)
+    DOCKER_OPENOCD   =
+    GDB_CMD          = $(GDB_BINARY)
+    STUB_MAKE_CMD    = $(MAKE) -C ../X2_pi5_jtag_halt_stub
 else
     DOCKER_OPENOCD   = echo "Not yet supported on non-Linux systems."; \#
+    STUB_MAKE_CMD    = echo "Not yet supported on non-Linux systems."; \#
 endif
 
-
+# These commands are always local, as per the repository's design
+RUSTC_CMD   = $(BASE_RUSTC_CMD)
+DOC_CMD     = $(BASE_DOC_CMD)
+CLIPPY_CMD  = $(BASE_CLIPPY_CMD)
+TEST_CMD    = $(BASE_TEST_CMD)
+OBJCOPY_CMD = $(BASE_OBJCOPY_CMD)
+CLEAN_CMD   = cargo clean
 
 ##--------------------------------------------------------------------------------------------------
 ## Targets
@@ -191,6 +222,7 @@ $(LAST_BUILD_CONFIG):
 ##------------------------------------------------------------------------------
 $(KERNEL_ELF_RAW): $(KERNEL_ELF_RAW_DEPS)
 	$(call color_header, "Compiling kernel ELF - $(BSP)")
+	@echo "RUSTC_CMD: RUSTFLAGS=\"$(RUSTFLAGS_PEDANTIC)\" $(RUSTC_CMD)"
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
 
 ##------------------------------------------------------------------------------
@@ -297,7 +329,15 @@ nm: $(KERNEL_ELF)
 ## Push the JTAG boot image to the real HW target
 ##------------------------------------------------------------------------------
 jtagboot:
+ifeq ($(BSP),rpi5)
+	$(call color_header, "Building RPi5 Halt Stub")
+	@$(STUB_MAKE_CMD)
+	@cp $(JTAG_BOOT_IMAGE) kernel8.img
+	$(call color_progress_prefix, "Finished")
+	@echo "Created kernel8.img. Please copy this to your SD card."
+else
 	@$(DOCKER_JTAGBOOT) $(EXEC_MINIPUSH) $(DEV_SERIAL) $(JTAG_BOOT_IMAGE)
+endif
 
 ##------------------------------------------------------------------------------
 ## Start OpenOCD session
@@ -312,7 +352,11 @@ openocd:
 gdb-opt0: RUSTC_MISC_ARGS += -C opt-level=0
 gdb gdb-opt0: $(KERNEL_ELF)
 	$(call color_header, "Launching GDB")
-	@$(DOCKER_GDB) gdb-multiarch -q $(KERNEL_ELF)
+ifeq ($(BSP),rpi5)
+	@$(GDB_CMD) -q -x $(GDB_INIT_FILE) $(KERNEL_ELF)
+else
+	@$(GDB_CMD) -q $(KERNEL_ELF)
+endif
 
 
 
@@ -323,19 +367,18 @@ gdb gdb-opt0: $(KERNEL_ELF)
 
 test_unit test_integration: FEATURES += --features test_build
 
-ifeq ($(QEMU_MACHINE_TYPE),) # QEMU is not supported for the board.
-
-test_boot test_unit test_integration test:
-	$(call color_header, "$(QEMU_MISSING_STRING)")
-
-else # QEMU is supported.
-
 ##------------------------------------------------------------------------------
 ## Run boot test
 ##------------------------------------------------------------------------------
 test_boot: $(KERNEL_BIN)
-	$(call color_header, "Boot test - $(BSP)")
+ifeq ($(BSP),rpi5)
+	@$(call color_header, "Skipping boot test for $(BSP) (no QEMU support)")
+else ifeq ($(QEMU_MACHINE_TYPE),)
+	@$(call color_header, "$(QEMU_MISSING_STRING)")
+else
+	@$(call color_header, "Boot test - $(BSP)")
 	@$(DOCKER_TEST) $(EXEC_TEST_DISPATCH) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) -kernel $(KERNEL_BIN)
+endif
 
 ##------------------------------------------------------------------------------
 ## Helpers for unit and integration test targets
@@ -376,18 +419,30 @@ endef
 ## Run unit test(s)
 ##------------------------------------------------------------------------------
 test_unit:
-	$(call color_header, "Compiling unit test(s) - $(BSP)")
-	$(call test_prepare)
+ifeq ($(BSP),rpi5)
+	@echo "## Compiling unit test(s) for $(BSP), but not running."
+	@echo "Due to no QEMU support, tests are built but not executed."
+	@echo "Load and run the test binaries on-target manually for verification."
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --no-run --lib
+else
+	@$(call color_header, "Compiling unit test(s) - $(BSP)")
+	@$(call test_prepare)
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --lib
+endif
 
 ##------------------------------------------------------------------------------
 ## Run integration test(s)
 ##------------------------------------------------------------------------------
 test_integration:
-	$(call color_header, "Compiling integration test(s) - $(BSP)")
-	$(call test_prepare)
+ifeq ($(BSP),rpi5)
+	@echo "## Compiling integration test(s) for $(BSP), but not running."
+	@echo "Due to no QEMU support, tests are built but not executed."
+	@echo "Load and run the test binaries on-target manually for verification."
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --no-run $(TEST_ARG)
+else
+	@$(call color_header, "Compiling integration test(s) - $(BSP)")
+	@$(call test_prepare)
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) $(TEST_ARG)
+endif
 
 test: test_boot test_unit test_integration
-
-endif
