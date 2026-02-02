@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! BSP driver support.
 
@@ -12,6 +13,9 @@ use crate::{
     memory,
     memory::mmu::MMIODescriptor,
 };
+
+#[cfg(feature = "bsp_rpi5")]
+use crate::driver::interface::DeviceDriver;
 use core::{
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
@@ -30,6 +34,13 @@ static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::InterruptController>
 
 #[cfg(feature = "bsp_rpi4")]
 static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::GICv2> = MaybeUninit::uninit();
+
+#[cfg(feature = "bsp_rpi5")]
+static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::BCM2712InterruptController> =
+    MaybeUninit::uninit();
+
+#[cfg(feature = "bsp_rpi5")]
+static mut PCIE: MaybeUninit<device_driver::BCM2712PCIe> = MaybeUninit::uninit();
 
 //--------------------------------------------------------------------------------------------------
 // Private Code
@@ -54,12 +65,26 @@ unsafe fn post_init_uart() -> Result<(), &'static str> {
 }
 
 /// This must be called only after successful init of the memory subsystem.
+#[cfg(not(feature = "bsp_rpi5"))]
 unsafe fn instantiate_gpio() -> Result<(), &'static str> {
     let mmio_descriptor = MMIODescriptor::new(mmio::GPIO_START, mmio::GPIO_SIZE);
     let virt_addr =
         memory::mmu::kernel_map_mmio(device_driver::GPIO::COMPATIBLE, &mmio_descriptor)?;
 
     GPIO.write(device_driver::GPIO::new(virt_addr));
+
+    Ok(())
+}
+
+#[cfg(feature = "bsp_rpi5")]
+unsafe fn instantiate_gpio() -> Result<(), &'static str> {
+    let gpio_desc = MMIODescriptor::new(mmio::GPIO_START, mmio::GPIO_SIZE);
+    let gpio_virt = memory::mmu::kernel_map_mmio("RP1 GPIO", &gpio_desc)?;
+
+    let pads_desc = MMIODescriptor::new(mmio::PADS_START, mmio::PADS_SIZE);
+    let pads_virt = memory::mmu::kernel_map_mmio("RP1 PADS", &pads_desc)?;
+
+    GPIO.write(device_driver::GPIO::new(pads_virt, gpio_virt));
 
     Ok(())
 }
@@ -97,6 +122,46 @@ unsafe fn instantiate_interrupt_controller() -> Result<(), &'static str> {
     INTERRUPT_CONTROLLER.write(device_driver::GICv2::new(gicd_virt_addr, gicc_virt_addr));
 
     Ok(())
+}
+
+#[cfg(feature = "bsp_rpi5")]
+unsafe fn instantiate_interrupt_controller() -> Result<(), &'static str> {
+    let gicd_desc = MMIODescriptor::new(mmio::GICD_START, mmio::GICD_SIZE);
+    let gicd_virt = memory::mmu::kernel_map_mmio("GICv2 GICD", &gicd_desc)?;
+
+    let gicc_desc = MMIODescriptor::new(mmio::GICC_START, mmio::GICC_SIZE);
+    let gicc_virt = memory::mmu::kernel_map_mmio("GICv2 GICC", &gicc_desc)?;
+
+    let mip_desc = MMIODescriptor::new(mmio::MIP_START, mmio::MIP_SIZE);
+    let mip_virt = memory::mmu::kernel_map_mmio("MIP", &mip_desc)?;
+
+    let rp1_desc = MMIODescriptor::new(mmio::RP1_CFG_START, mmio::RP1_CFG_SIZE);
+    let rp1_virt = memory::mmu::kernel_map_mmio("RP1 Config (IntC)", &rp1_desc)?;
+
+    INTERRUPT_CONTROLLER.write(device_driver::BCM2712InterruptController::new(
+        gicd_virt, gicc_virt, mip_virt, rp1_virt,
+    ));
+
+    Ok(())
+}
+
+#[cfg(feature = "bsp_rpi5")]
+unsafe fn instantiate_pcie() -> Result<(), &'static str> {
+    let rc_desc = MMIODescriptor::new(mmio::PCIE_RC_START, mmio::PCIE_RC_SIZE);
+    let rc_virt = memory::mmu::kernel_map_mmio("PCIe RC", &rc_desc)?;
+
+    let rp1_desc = MMIODescriptor::new(mmio::RP1_CFG_START, mmio::RP1_CFG_SIZE);
+    let rp1_virt = memory::mmu::kernel_map_mmio("RP1 Config", &rp1_desc)?;
+
+    PCIE.write(device_driver::BCM2712PCIe::new(rc_virt, rp1_virt));
+
+    Ok(())
+}
+
+#[cfg(feature = "bsp_rpi5")]
+unsafe fn driver_pcie() -> Result<(), &'static str> {
+    instantiate_pcie()?;
+    PCIE.assume_init_ref().init()
 }
 
 /// This must be called only after successful init of the interrupt controller driver.
@@ -162,6 +227,9 @@ pub unsafe fn init() -> Result<(), &'static str> {
     if INIT_DONE.load(Ordering::Relaxed) {
         return Err("Init already done");
     }
+
+    #[cfg(feature = "bsp_rpi5")]
+    driver_pcie()?;
 
     driver_uart()?;
     driver_gpio()?;
