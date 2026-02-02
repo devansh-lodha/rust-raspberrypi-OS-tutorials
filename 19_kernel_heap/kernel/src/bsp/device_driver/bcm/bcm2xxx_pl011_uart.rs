@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
+// Copyright (c) 2026 Devansh Lodha <devanshlodha12@gmail.com>
 
 //! PL011 UART driver.
 //!
@@ -294,8 +295,20 @@ impl PL011UartInner {
         // contents of IBRD or FBRD, a LCR_H write must always be performed at the end.
         //
         // Set the baud rate, 8N1 and FIFO enabled.
-        self.registers.IBRD.write(IBRD::BAUD_DIVINT.val(3));
-        self.registers.FBRD.write(FBRD::BAUD_DIVFRAC.val(16));
+        #[cfg(feature = "bsp_rpi5")]
+        {
+            // RP1 UART Clock: 50MHz
+            // Target Baud: 115200
+            // Divider: 50,000,000 / (16 * 115200) = 27.1267
+            // IBRD = 26, FBRD = 3 (Adjusted for timing margin)
+            self.registers.IBRD.write(IBRD::BAUD_DIVINT.val(26));
+            self.registers.FBRD.write(FBRD::BAUD_DIVFRAC.val(3));
+        }
+        #[cfg(not(feature = "bsp_rpi5"))]
+        {
+            self.registers.IBRD.write(IBRD::BAUD_DIVINT.val(3));
+            self.registers.FBRD.write(FBRD::BAUD_DIVFRAC.val(16));
+        }
         self.registers
             .LCR_H
             .write(LCR_H::WLEN::EightBit + LCR_H::FEN::FifosEnabled);
@@ -384,6 +397,9 @@ impl PL011UartInner {
 impl fmt::Write for PL011UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
+            if c == '\n' {
+                self.write_char('\r');
+            }
             self.write_char(c);
         }
 
